@@ -1,29 +1,25 @@
 import { NextResponse } from "next/server";
 
-// POST -> /api/login
 export async function POST(request: Request) {
   try {
-    // 1. Get the data sent from the Frontend
     const body = await request.json();
     const { token, email } = body;
 
-    // Quick check: If no token provided, stop immediately
     if (!token) {
-      return NextResponse.json(
-        { status: false, message: "Recaptcha token missing" },
-        { status: 400 }
-      );
+      return NextResponse.json({ message: "Token missing" }, { status: 400 });
     }
 
-    // 2. Define your Google Cloud keys (from env variables)
+    // Configuration
     const projectID = process.env.RECAPTCHA_PROJECT_ID;
     const apiKey = process.env.RECAPTCHA_API_KEY;
     const siteKey = process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY;
 
-    // 3. Construct the Google Verification URL
+    // IMPORTANT: This must match the frontend { action: "LOGIN" } exactly
+    const EXPECTED_ACTION = "LOGIN";
+
+    // Verify with Google
     const verifyUrl = `https://recaptchaenterprise.googleapis.com/v1/projects/${projectID}/assessments?key=${apiKey}`;
 
-    // 4. Send the token to Google to verify
     const googleResponse = await fetch(verifyUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -31,63 +27,48 @@ export async function POST(request: Request) {
         event: {
           token: token,
           siteKey: siteKey,
-          expectedAction: "LOGIN", // This MUST match the action name used in frontend
+          expectedAction: EXPECTED_ACTION,
         },
       }),
     });
 
     const googleData = await googleResponse.json();
 
-    console.log("start");
+    // --- SECURITY CHECKS ---
 
-    console.log(googleData);
-
-    console.log("end");
-
-    // 5. VALIDATION CHECKS
-
-    // Check A: Is the token actually valid?
+    // 1. Check if token is valid
     if (!googleData.tokenProperties.valid) {
-      return NextResponse.json(
-        { status: false, message: "Invalid Token" },
-        { status: 400 }
-      );
+      console.error("Invalid Token:", googleData.tokenProperties.invalidReason);
+      return NextResponse.json({ message: "Invalid Token" }, { status: 400 });
     }
 
-    // Check B: Verify the Action matches (CRITICAL STEP YOU MISSED)
-    // The frontend sent 'LOGIN', but you wrote 'LOGINS' in your expectedAction.
-    // Make sure these match exactly in your code.
-    if (googleData.tokenProperties.action !== "LOGIN") {
-      return NextResponse.json(
-        { status: false, message: "Invalid Action" },
-        { status: 400 }
-      );
+    // 2. Check if the Action matches (Prevent token reuse)
+    if (googleData.tokenProperties.action !== EXPECTED_ACTION) {
+      console.error("Action Mismatch:", googleData.tokenProperties.action);
+      return NextResponse.json({ message: "Invalid Action" }, { status: 400 });
     }
 
-    // Check C: Score Check
-    if (googleData.riskAnalysis.score < 0.5) {
+    // 3. Check the Score (0.0 = Bot, 1.0 = Human)
+    const score = googleData.riskAnalysis.score;
+    if (score < 0.5) {
+      console.warn(`Bot detected for ${email}. Score: ${score}`);
       return NextResponse.json(
-        { status: false, message: "Bot detected" },
+        { message: "Bot behavior detected" },
         { status: 403 }
       );
     }
 
-    // --- SAFETY CHECK PASSED ---
-
-    // 6. NOW you can do your actual Login Logic
-    // e.g. Check database for email/password
-    console.log(
-      `User ${email} passed security check with score: ${googleData.riskAnalysis.score}`
-    );
+    // --- SUCCESS ---
+    console.log(`User ${email} passed with score: ${score}`);
 
     return NextResponse.json(
-      { status: true, message: "Login Successful" },
+      { status: true, message: "Login Successful", score: score },
       { status: 200 }
     );
   } catch (error) {
     console.error(error);
     return NextResponse.json(
-      { status: false, message: "Internal Server Error" },
+      { message: "Internal Server Error" },
       { status: 500 }
     );
   }

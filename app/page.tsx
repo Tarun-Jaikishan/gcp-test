@@ -1,27 +1,24 @@
 "use client";
 
+import Script from "next/script";
 import { useState } from "react";
 
-import RecaptchaScript from "../components/RecaptchaScript";
-
-export default function Home() {
+export default function LoginWithCheckbox() {
   const [email, setEmail] = useState("");
 
-  const handleLogin = async (e) => {
+  const handleLogin = async (e: any) => {
     e.preventDefault();
 
-    // 1. Get the token from Google
-    if (!window.grecaptcha) {
-      alert("Recaptcha not loaded yet!");
+    // 1. Get the token from the Checkbox Widget
+    // "grecaptcha.enterprise.getResponse()" gets the token from the visible widget
+    const token = window.grecaptcha.enterprise.getResponse();
+
+    if (!token) {
+      alert("Please check the box to prove you are human!");
       return;
     }
 
-    const token = await window.grecaptcha.enterprise.execute(
-      process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY,
-      { action: "LOGIN" } // Label this action
-    );
-
-    // 2. Send token + form data to YOUR backend
+    // 2. Send to Backend
     const res = await fetch("/api/login", {
       method: "POST",
       body: JSON.stringify({ email, token }),
@@ -29,27 +26,45 @@ export default function Home() {
     });
 
     const data = await res.json();
-
-    console.log(data);
-    if (data.status) {
-      alert("Login Successful!");
+    if (res.ok) {
+      alert("Success!");
     } else {
-      alert("Bot detected or Login failed!");
+      alert("Failed: " + data.message);
     }
   };
 
   return (
-    <div>
-      <RecaptchaScript /> {/* Load the script */}
+    <div style={{ padding: 20 }}>
+      {/* Load the Google Script */}
+      <Script
+        src="https://www.google.com/recaptcha/enterprise.js"
+        strategy="afterInteractive"
+        async
+        defer
+      />
+
       <form onSubmit={handleLogin}>
-        <h1>Login</h1>
+        <h1>Login (Checkbox Version)</h1>
+
         <input
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="Email"
+          style={{ display: "block", marginBottom: 10 }}
         />
-        <button type="submit">Sign In</button>
+
+        {/* This DIV renders the Checkbox Widget */}
+        {/* Replace data-sitekey with your NEW CHECKBOX KEY */}
+        <div
+          className="g-recaptcha"
+          data-sitekey={process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY}
+          data-action="LOGIN"
+        ></div>
+
+        <br />
+
+        <button type="submit">Submit</button>
       </form>
     </div>
   );
